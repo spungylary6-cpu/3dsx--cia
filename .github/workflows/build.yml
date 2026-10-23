@@ -1,10 +1,6 @@
 name: Build CIA
 
 on:
-  push:
-    branches: [ main, master ]
-    tags: [ 'v*' ]
-  pull_request:
   workflow_dispatch:
 
 jobs:
@@ -18,46 +14,30 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends ca-certificates file jq
 
+      - name: Join game parts
+        run: |
+          INPUT=$(jq -r '.Input' info.json)
+          cat game_part1.zip game_part2.zip game_part3.zip game_part4.zip > "$INPUT"
+          echo "1b254016640edb78b5c88130a551328de75b4f687383905de738982a68621eec  $INPUT" | sha256sum -c -
+
       - name: Convert 3DSX to CIA
         run: |
           chmod +x cxitool makerom bannertool
-          if [ ! -f info.json ]; then echo "Error: info.json not found"; exit 1; fi
           TID=$(jq -r '."Title-ID"' info.json)
           CODE=$(jq -r '."Product-Code"' info.json)
           BANNER=$(jq -r '.Banner' info.json)
           AUDIO=$(jq -r '.Bnr_audio' info.json)
           INPUT=$(jq -r '.Input' info.json)
           OUTPUT=$(jq -r '.Output' info.json)
-          if [ "$TID" = "null" ] || [ -z "$TID" ]; then echo "Error: 'Title-ID' missing in info.json"; exit 1; fi
-          if [ "$CODE" = "null" ] || [ -z "$CODE" ]; then echo "Error: 'Product-Code' missing in info.json"; exit 1; fi
-          if [ "$BANNER" = "null" ] || [ -z "$BANNER" ]; then echo "Error: 'Banner' missing in info.json"; exit 1; fi
-          if [ "$AUDIO" = "null" ] || [ -z "$AUDIO" ]; then echo "Error: 'Bnr_audio' missing in info.json"; exit 1; fi
-          if [ "$INPUT" = "null" ] || [ -z "$INPUT" ]; then echo "Error: 'Input' missing in info.json"; exit 1; fi
-          if [ "$OUTPUT" = "null" ] || [ -z "$OUTPUT" ]; then echo "Error: 'Output' missing in info.json"; exit 1; fi
-          if [ ! -f "$BANNER" ]; then echo "Error: banner file '$BANNER' not found"; exit 1; fi
-          if [ ! -f "$AUDIO" ]; then echo "Error: audio file '$AUDIO' not found"; exit 1; fi
-          if [ ! -f "$INPUT" ]; then echo "Error: input file '$INPUT' not found"; exit 1; fi
-          WIDTH=$(file "$BANNER" | grep -oP '\d+(?= x)' | head -1)
-          HEIGHT=$(file "$BANNER" | grep -oP '(?<=x )\d+' | head -1)
-          if [ "$WIDTH" != "256" ] || [ "$HEIGHT" != "128" ]; then
-            echo "Error: banner must be 256x128 pixels, got ${WIDTH}x${HEIGHT}"
-            exit 1
-          fi
           ./bannertool makebanner -i "$BANNER" -a "$AUDIO" -o banner.bnr
           ./cxitool -b banner.bnr -t "$TID" -c "$CODE" "$INPUT" temp.cxi
           ./makerom -f cia -o "$OUTPUT" -target t -i temp.cxi:0:0 -ignoresign
           rm -f temp.cxi banner.bnr
 
-      - name: Upload CIA artifacts
+      - name: Upload CIA artifact
         uses: actions/upload-artifact@v4
         with:
           name: cia-build
           path: ./*.cia
           if-no-files-found: error
           retention-days: 30
-
-      - name: Attach CIA to Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ./*.cia
